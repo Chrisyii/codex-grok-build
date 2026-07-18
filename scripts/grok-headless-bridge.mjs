@@ -1,154 +1,204 @@
 #!/usr/bin/env node
 /**
- * 简单可靠的 Headless 桥接（fallback）
+ * Reliable headless bridge for Grok Build media generation.
  *
- * 使用 `grok -p "..." --yolo --output-format json`
- * Grok Build 会完整执行工具（包括 image_gen），然后返回 JSON。
- *
- * 优点：简单、可靠、启动相对快。
- * 缺点：没有 ACP 的实时 tool visibility 和 thoughts 流。
- *
- * Codex skill / MCP 可以优先尝试 ACP，失败或超时后用这个。
+ * Grok writes its result as JSON to stdout. This bridge extracts generated
+ * media, moves it into the calling project's generated/ directory, and
+ * returns only paths that are accessible to Codex.
  */
 
-import { spawn } from 'child_process';
-import { resolve, join, basename, dirname } from 'path';
-import { mkdirSync, copyFileSync, existsSync, renameSync, unlinkSync } from 'fs';
+import { spawn } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 
 const DEFAULT_GROK = process.env.GROK_PATH || resolve(process.env.HOME, '.grok/bin/grok');
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+const MEDIA_PATH_PATTERN = /\/(?:[^\s"'`<>|])+\.(?:png|jpg|jpeg|gif|webp|mp4|mov|avi)/gi;
+
+function parseGrokOutput(stdout) {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    const match = stdout.match(/\{[\s\S]*\}$/);
+    if (match) return JSON.parse(match[0]);
+  }
+
+  throw new Error('Grok did not return valid JSON output');
+}
+
+function getResultText(result) {
+  if (typeof result.text === 'string') return result.text;
+  if (typeof result.content === 'string') return result.content;
+  if (Array.isArray(result.content)) {
+    return result.content
+      .map((item) => (typeof item === 'string' ? item : item?.text || ''))
+      .join('');
+  }
+  return '';
+}
+
+function getMediaPaths(text, result) {
+  const paths = new Set();
+  let match;
+
+  while ((match = MEDIA_PATH_PATTERN.exec(text)) !== null) {
+    paths.add(match[0]);
+  }
+
+  if (Array.isArray(result.mediaPaths)) {
+    for (const path of result.mediaPaths) {
+      if (typeof path === 'string' && path.startsWith('/')) paths.add(path);
+    }
+  }
+
+  return [...paths];
+}
+
+function nextDestination(outputDir, originalPath, index) {
+  return join(outputDir, `${Date.now()}-${index + 1}-${basename(originalPath)}`);
+}
+
+function moveMedia(paths, outputDir) {
+  const movedPaths = [];
+  const missingMediaPaths = [];
+  const replacements = new Map();
+
+  paths.forEach((originalPath, index) => {
+    if (!existsSync(originalPath)) {
+      missingMediaPaths.push(originalPath);
+      return;
+    }
+
+    const destination = nextDestination(outputDir, originalPath, index);
+    try {
+      renameSync(originalPath, destination);
+    } catch (error) {
+      if (error?.code !== 'EXDEV') throw error;
+      copyFileSync(originalPath, destination);
+      unlinkSync(originalPath);
+    }
+
+    movedPaths.push(destination);
+    replacements.set(originalPath, destination);
+  });
+
+  return { movedPaths, missingMediaPaths, replacements };
+}
+
+function replaceMediaPaths(text, replacements) {
+  let result = text;
+  for (const [originalPath, destination] of replacements) {
+    result = result.replaceAll(originalPath, destination);
+  }
+  return result;
+}
+
+function buildPrompt(prompt) {
+  return `${prompt}
+
+生成图片或视频后，请在最终输出中使用 Markdown 报告每个生成文件的原始绝对路径，例如：
+![描述](</绝对路径/文件.mp4>)`;
+}
 
 export async function runWithHeadless(prompt, options = {}) {
   const grokBin = options.grokBin || DEFAULT_GROK;
   const cwd = options.cwd || process.cwd();
-  // 目标输出目录：优先用户指定的，否则当前项目的 generated/ 子目录
   const outputDir = options.outputDir || join(cwd, 'generated');
+  const timeoutMs = options.timeoutMs || DEFAULT_TIMEOUT_MS;
 
-  // 确保输出目录存在
-  if (!existsSync(outputDir)) {
-    mkdirSync(outputDir, { recursive: true });
-  }
-
-  const fullPrompt = `${prompt}
-
-重要：生成图片或视频后，请务必在最终输出中使用 Markdown 报告生成的**原始路径**，例如：
-![描述](</grok生成的原始绝对路径/文件.png>)
-`;
+  mkdirSync(outputDir, { recursive: true });
 
   const args = [
-    '-p', fullPrompt,
+    '-p',
+    buildPrompt(prompt),
     '--yolo',
-    '--output-format', 'json',
-    '--cwd', cwd,
+    '--no-plan',
+    '--no-subagents',
+    '--no-memory',
+    '--disable-web-search',
+    '--output-format',
+    'json',
+    '--cwd',
+    cwd,
   ];
 
-  console.error(`[grok-headless] Running Grok in ${cwd}, will move media to ${outputDir}`);
+  console.error(`[grok-headless] Running Grok in ${cwd}; output directory: ${outputDir}`);
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolveResult, rejectResult) => {
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback(value);
+    };
     const proc = spawn(grokBin, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd,
     });
+    const timeout = setTimeout(() => {
+      proc.kill('SIGTERM');
+      finish(rejectResult, new Error(`Grok timed out after ${Math.round(timeoutMs / 1000)} seconds`));
+    }, timeoutMs);
+    const appendOutput = (target, chunk) => {
+      const next = target.value + chunk.toString();
+      if (Buffer.byteLength(next) > MAX_OUTPUT_BYTES) {
+        proc.kill('SIGTERM');
+        finish(rejectResult, new Error('Grok output exceeded the 4 MiB safety limit'));
+        return;
+      }
+      target.value = next;
+    };
 
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-
+    const stdoutBuffer = { value: stdout };
+    const stderrBuffer = { value: stderr };
+    proc.stdout.on('data', (chunk) => appendOutput(stdoutBuffer, chunk));
+    proc.stderr.on('data', (chunk) => appendOutput(stderrBuffer, chunk));
+    proc.on('error', (error) => finish(rejectResult, new Error(`Could not start Grok: ${error.message}`)));
     proc.on('close', (code) => {
+      if (settled) return;
+      stdout = stdoutBuffer.value;
+      stderr = stderrBuffer.value;
+
       if (code !== 0) {
-        console.error('[grok-headless] stderr:', stderr.slice(-2000));
-        return reject(new Error(`grok -p exited with code ${code}`));
+        finish(rejectResult, new Error(`Grok exited with code ${code}`));
+        return;
       }
 
-      let parsed;
       try {
-        parsed = JSON.parse(stdout);
-      } catch (e) {
-        const match = stdout.match(/\{[\s\S]*\}$/);
-        if (match) parsed = JSON.parse(match[0]);
-      }
-
-      if (!parsed) {
-        return reject(new Error('Could not parse grok -p JSON output'));
-      }
-
-      const text = parsed.text || parsed.content || '';
-      let mediaPaths = [];
-
-      // 提取 Grok 报告的原始路径
-      const pathRe = /(\/[^\s"'`<>|]+\.(png|jpg|jpeg|gif|webp|mp4|mov|avi))/gi;
-      let m;
-      while ((m = pathRe.exec(text)) !== null) {
-        if (m[1].startsWith('/')) mediaPaths.push(m[1]);
-      }
-      if (parsed.mediaPaths) mediaPaths.push(...parsed.mediaPaths);
-      mediaPaths = [...new Set(mediaPaths)];
-
-      // === 关键改进：移动（剪切）文件到当前 Codex 项目目录，避免双份占用 ===
-      const movedPaths = [];
-      for (const originalPath of mediaPaths) {
-        try {
-          if (existsSync(originalPath)) {
-            const filename = basename(originalPath);
-            // 避免重名，简单加时间戳前缀
-            const timestamp = Date.now();
-            const newPath = join(outputDir, `${timestamp}-${filename}`);
-
-            // 尝试直接 rename（同文件系统最快）
-            try {
-              renameSync(originalPath, newPath);
-              movedPaths.push(newPath);
-              console.error(`[grok-headless] Moved to project: ${newPath}`);
-            } catch (renameErr) {
-              // 跨文件系统时 rename 会失败，回退到 copy + delete
-              if (renameErr.code === 'EXDEV') {
-                copyFileSync(originalPath, newPath);
-                unlinkSync(originalPath);
-                movedPaths.push(newPath);
-                console.error(`[grok-headless] Copied+deleted (cross-fs) to project: ${newPath}`);
-              } else {
-                throw renameErr;
-              }
-            }
-          } else {
-            movedPaths.push(originalPath); // 保底返回原路径
-          }
-        } catch (moveErr) {
-          console.error(`[grok-headless] Failed to move ${originalPath}:`, moveErr.message);
-          movedPaths.push(originalPath);
+        const raw = parseGrokOutput(stdout);
+        if (raw.error) {
+          throw new Error(typeof raw.error === 'string' ? raw.error : 'Grok reported an error');
         }
-      }
 
-      // 可选：尝试在返回的 text 中把原路径替换成新路径（简单处理）
-      let finalText = text;
-      for (let i = 0; i < mediaPaths.length; i++) {
-        if (copiedPaths[i] && mediaPaths[i] !== copiedPaths[i]) {
-          finalText = finalText.replaceAll(mediaPaths[i], copiedPaths[i]);
-        }
+        const text = getResultText(raw);
+        const sourcePaths = getMediaPaths(text, raw);
+        const { movedPaths, missingMediaPaths, replacements } = moveMedia(sourcePaths, outputDir);
+        finish(resolveResult, {
+          success: true,
+          text: replaceMediaPaths(text, replacements),
+          mediaPaths: movedPaths,
+          missingMediaPaths,
+          originalGrokPaths: sourcePaths,
+          raw,
+          outputDir,
+        });
+      } catch (error) {
+        finish(rejectResult, error instanceof Error ? error : new Error(String(error)));
       }
-
-      resolve({
-        success: true,
-        text: finalText,
-        mediaPaths: movedPaths,
-        originalGrokPaths: mediaPaths,
-        raw: parsed,
-        outputDir,
-      });
     });
-
-    proc.on('error', reject);
   });
 }
 
-// CLI
 if (import.meta.url === `file://${process.argv[1]}`) {
   const prompt = process.argv.slice(2).join(' ') || '生成一张测试图片';
-  runWithHeadless(prompt).then(r => {
-    console.log(JSON.stringify(r, null, 2));
-  }).catch(e => {
-    console.error(e);
-    process.exit(1);
-  });
+  runWithHeadless(prompt)
+    .then((result) => console.log(JSON.stringify(result, null, 2)))
+    .catch((error) => {
+      console.error(error.message);
+      process.exitCode = 1;
+    });
 }

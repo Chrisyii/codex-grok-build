@@ -36,7 +36,7 @@ if [ ! -f "$SCRIPT_DIR/scripts/grok-headless-bridge.mjs" ] && [ "$SCRIPT_DIR" !=
 fi
 
 # 1. 创建目标目录
-mkdir -p "$TARGET_SKILL_DIR/scripts"
+mkdir -p "$TARGET_SKILL_DIR/scripts" "$TARGET_SKILL_DIR/test"
 
 # 2. 复制/同步文件
 if [ "$SCRIPT_DIR" = "$TARGET_SKILL_DIR" ]; then
@@ -45,10 +45,14 @@ else
   echo "同步 skill 定义..."
   cp -f "$SCRIPT_DIR/SKILL.md" "$TARGET_SKILL_DIR/" 2>/dev/null || echo "  - SKILL.md 跳过"
   cp -f "$SCRIPT_DIR/README.md" "$TARGET_SKILL_DIR/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/package.json" "$TARGET_SKILL_DIR/" 2>/dev/null || true
 
   echo "同步桥接脚本..."
   cp -f "$SCRIPT_DIR/scripts/"*.mjs "$TARGET_SKILL_DIR/scripts/" 2>/dev/null || true
   chmod +x "$TARGET_SKILL_DIR/scripts/"*.mjs 2>/dev/null || true
+
+  echo "同步回归测试..."
+  cp -f "$SCRIPT_DIR/test/"*.test.mjs "$TARGET_SKILL_DIR/test/" 2>/dev/null || true
 fi
 
 # 3. 健康检查
@@ -125,8 +129,8 @@ else
 fi
 
 echo
-echo "推荐直接测试（最快验证）："
-echo "  node $TARGET_SKILL_DIR/scripts/grok-headless-bridge.mjs '生成一张 1:1 测试图片：红色苹果'"
+echo "推荐回归测试（不生成真实媒体）："
+echo "  cd $TARGET_SKILL_DIR && npm test"
 
 echo
 echo "（可选）如果你用 mcp-configs/mcp-servers.json，手动加下面这段："

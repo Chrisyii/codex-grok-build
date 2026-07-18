@@ -1,157 +1,165 @@
 #!/usr/bin/env node
 /**
- * Grok Build MCP Server for Codex
+ * MCP server exposing Grok Build to Codex.
  *
- * 暴露工具：
- *   grok_generate_image
- *   grok_generate_video
- *   grok_run
- *
- * 优先使用可靠的 headless 桥接（grok -p），ACP 版本可后续切换。
- * 这样 Codex 可以直接调用本地登录的 Grok Build 来生成图片/视频。
- *
- * 注册示例见 mcp-example/grok-acp.json
+ * Media tools require an absolute cwd so every completed file has a
+ * deterministic destination: <cwd>/generated/.
  */
 
+import { createInterface } from 'node:readline';
+import { isAbsolute } from 'node:path';
+
 import { runWithHeadless } from './grok-headless-bridge.mjs';
-import { createInterface } from 'readline';
 
 const rl = createInterface({ input: process.stdin });
+const MEDIA_TOOLS = new Set(['grok_generate_image', 'grok_generate_video']);
 
 function sendResponse(id, result) {
-  const msg = JSON.stringify({ jsonrpc: '2.0', id, result });
-  process.stdout.write(msg + '\n');
+  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
 }
 
 function sendError(id, code, message) {
-  const msg = JSON.stringify({
+  process.stdout.write(`${JSON.stringify({
     jsonrpc: '2.0',
     id,
     error: { code, message },
-  });
-  process.stdout.write(msg + '\n');
+  })}\n`);
+}
+
+function requirePrompt(prompt) {
+  if (typeof prompt !== 'string' || prompt.trim() === '') {
+    throw new Error('prompt must be a non-empty string');
+  }
+  return prompt.trim();
+}
+
+function requireProjectDirectory(cwd) {
+  if (typeof cwd !== 'string' || !isAbsolute(cwd)) {
+    throw new Error('cwd must be an absolute project path');
+  }
+  return cwd;
+}
+
+function formatMediaPrompt(name, prompt, args) {
+  if (name === 'grok_generate_image') {
+    const aspectRatio = args.aspect_ratio || '1:1';
+    return `${prompt}\n\n请使用 Grok Build 的 image_gen 工具生成图片（aspect_ratio: ${aspectRatio}）。`;
+  }
+
+  if (args.base_image) {
+    if (typeof args.base_image !== 'string' || !isAbsolute(args.base_image)) {
+      throw new Error('base_image must be an absolute file path');
+    }
+    return `使用提供的图片 ${args.base_image} 作为首帧。\n${prompt}\n请使用 image_to_video 生成 6 秒短片。`;
+  }
+  return `${prompt}\n\n请使用 Grok Build 的 image_to_video 生成 6 秒短片。`;
+}
+
+function getTools() {
+  return [
+    {
+      name: 'grok_generate_image',
+      description: '使用登录的 Grok Build 生成图片。cwd 必须是当前项目的绝对路径；生成文件会移动到该项目的 generated/ 目录。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string' },
+          aspect_ratio: { type: 'string', default: '1:1' },
+          cwd: { type: 'string', description: '当前 Codex 项目的绝对路径' },
+        },
+        required: ['prompt', 'cwd'],
+      },
+    },
+    {
+      name: 'grok_generate_video',
+      description: '使用登录的 Grok Build 生成视频。cwd 必须是当前项目的绝对路径；生成文件会移动到该项目的 generated/ 目录。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string' },
+          base_image: { type: 'string', description: '可选，上一张图片的绝对路径' },
+          cwd: { type: 'string', description: '当前 Codex 项目的绝对路径' },
+        },
+        required: ['prompt', 'cwd'],
+      },
+    },
+    {
+      name: 'grok_run',
+      description: '把任意任务委托给 Grok Build agent 执行。',
+      inputSchema: {
+        type: 'object',
+        properties: { prompt: { type: 'string' } },
+        required: ['prompt'],
+      },
+    },
+  ];
+}
+
+async function handleToolCall(name, args) {
+  if (!MEDIA_TOOLS.has(name) && name !== 'grok_run') {
+    throw new Error(`Unknown tool: ${name}`);
+  }
+
+  const prompt = requirePrompt(args.prompt);
+  const isMediaTool = MEDIA_TOOLS.has(name);
+  const cwd = isMediaTool ? requireProjectDirectory(args.cwd) : process.cwd();
+  const taskPrompt = isMediaTool
+    ? formatMediaPrompt(name, prompt, args)
+    : `${prompt}\n\n执行完毕后，如果产生了媒体文件，请报告绝对路径。`;
+  const result = await runWithHeadless(taskPrompt, { cwd });
+
+  if (isMediaTool && result.mediaPaths.length === 0) {
+    const missing = result.missingMediaPaths.length > 0
+      ? ` Reported but inaccessible paths: ${result.missingMediaPaths.join(', ')}`
+      : '';
+    throw new Error(`Grok completed without an accessible generated media file.${missing}`);
+  }
+
+  const content = [];
+  if (result.text) content.push({ type: 'text', text: result.text });
+  for (const mediaPath of result.mediaPaths) {
+    content.push({ type: 'text', text: `已生成文件: ${mediaPath}` });
+  }
+  if (content.length === 0) {
+    content.push({ type: 'text', text: '执行完成（无额外输出）' });
+  }
+
+  return { content, isError: false };
 }
 
 rl.on('line', async (line) => {
-  let req;
+  let request;
   try {
-    req = JSON.parse(line);
+    request = JSON.parse(line);
   } catch {
     return;
   }
 
-  if (req.method === 'initialize') {
-    sendResponse(req.id, {
+  if (request.method === 'initialize') {
+    sendResponse(request.id, {
       protocolVersion: '2024-11-05',
-      capabilities: {
-        tools: {},
-      },
-      serverInfo: {
-        name: 'grok-acp',
-        version: '0.1.0',
-      },
+      capabilities: { tools: {} },
+      serverInfo: { name: 'grok-build', version: '0.2.0' },
     });
     return;
   }
 
-  if (req.method === 'tools/list') {
-    sendResponse(req.id, {
-      tools: [
-        {
-          name: 'grok_generate_image',
-          description: '使用登录的 Grok Build 生成图片。推荐传入 cwd 参数指定当前项目目录，生成的文件会自动移动（剪切）到项目 generated/ 文件夹，避免重复占用磁盘。',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              prompt: { type: 'string' },
-              aspect_ratio: { type: 'string', default: '1:1' },
-              cwd: { type: 'string', description: '当前 Codex 项目的绝对路径（推荐传入）' },
-            },
-            required: ['prompt'],
-          },
-        },
-        {
-          name: 'grok_generate_video',
-          description: '使用登录的 Grok Build 生成视频（从图或文）。推荐传入 cwd 参数，文件会自动移动到当前项目目录。',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              prompt: { type: 'string' },
-              base_image: { type: 'string', description: '可选，上一张图片路径' },
-              cwd: { type: 'string', description: '当前 Codex 项目的绝对路径（推荐传入）' },
-            },
-            required: ['prompt'],
-          },
-        },
-        {
-          name: 'grok_run',
-          description: '把任意任务委托给 Grok Build agent 执行',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              prompt: { type: 'string' },
-            },
-            required: ['prompt'],
-          },
-        },
-      ],
-    });
+  if (request.method === 'tools/list') {
+    sendResponse(request.id, { tools: getTools() });
     return;
   }
 
-  if (req.method === 'tools/call') {
-    const { name, arguments: args = {} } = req.params;
+  if (request.method === 'tools/call') {
     try {
-      let prompt = args.prompt || '';
-      // Codex agent 可以传入当前项目目录（推荐）
-      const projectCwd = args.cwd || args.project_dir || process.cwd();
-
-      if (name === 'grok_generate_image') {
-        const ar = args.aspect_ratio || '1:1';
-        prompt = `${prompt}\n\n请使用 Grok Build 的 image_gen 工具生成图片（aspect_ratio: ${ar}）。`;
-      } else if (name === 'grok_generate_video') {
-        if (args.base_image) {
-          prompt = `使用提供的图片 ${args.base_image} 作为首帧。\n${prompt}\n请使用 image_to_video 生成视频，优先 6 秒短片。`;
-        } else {
-          prompt = `${prompt}\n请使用 Grok Build 生成视频（优先 image_to_video）。`;
-        }
-      } else if (name === 'grok_run') {
-        prompt = `${prompt}\n\n执行完毕后，如果产生了媒体文件，请报告绝对路径。`;
-      }
-
-      // 传递项目目录，bridge 会自动把生成的文件复制到项目 generated/ 目录
-      const result = await runWithHeadless(prompt, { cwd: projectCwd });
-
-      const content = [];
-
-      if (result.text) {
-        content.push({ type: 'text', text: result.text });
-      }
-
-      if (result.mediaPaths && result.mediaPaths.length > 0) {
-        result.mediaPaths.forEach(p => {
-          content.push({ type: 'text', text: `已生成文件（已移动到当前项目 generated/ 目录）: ${p}` });
-        });
-      }
-
-      if (content.length === 0) {
-        content.push({ type: 'text', text: result.raw ? JSON.stringify(result.raw).slice(0, 500) : '执行完成（无额外输出）' });
-      }
-
-      sendResponse(req.id, {
-        content,
-        isError: false,
-      });
-    } catch (e) {
-      sendError(req.id, -32000, `Grok Build 执行失败: ${e.message}`);
+      const { name, arguments: args = {} } = request.params || {};
+      sendResponse(request.id, await handleToolCall(name, args));
+    } catch (error) {
+      sendError(request.id, -32000, `Grok Build 执行失败: ${error.message}`);
     }
     return;
   }
 
-  // 其他方法忽略或返回空
-  if (req.id !== undefined) {
-    sendResponse(req.id, null);
-  }
+  if (request.id !== undefined) sendResponse(request.id, null);
 });
 
-console.error('[grok-build-mcp] Grok Build MCP server ready (using headless bridge for reliability)');
+console.error('[grok-build-mcp] Ready');

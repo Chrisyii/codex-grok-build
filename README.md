@@ -29,223 +29,70 @@
 
 ---
 
-## ⚡ 一键安装（推荐）
+## Codex 调用方式
 
-你只需要执行下面这行命令即可完成安装：
+Codex 只有一条正常调用路径：
+
+| 请求 | MCP 工具 | 必填参数 | 输出 |
+| --- | --- | --- | --- |
+| 图片 | `grok_generate_image` | `prompt`、绝对路径 `cwd` | `<cwd>/generated/<file>` |
+| 视频 | `grok_generate_video` | `prompt`、绝对路径 `cwd` | `<cwd>/generated/<file>` |
+| 通用委托 | `grok_run` | `prompt` | 文本；有媒体时附带路径 |
+
+MCP 服务调用本机 `grok` 二进制，校验其 JSON 返回结果，只移动磁盘上真实存在的文件，
+并返回最终绝对路径。Codex 不需要直接调用 Grok CLI 或 ACP 脚本。
+
+## 前置条件
+
+1. 安装并登录 Grok Build：
+
+   ```bash
+   grok login
+   ```
+
+2. 在 Codex MCP 配置中注册服务。按实际安装路径调整：
+
+   ```toml
+   [mcp_servers.grok-build]
+   command = "node"
+   args = ["/absolute/path/to/codex-grok/scripts/grok-acp-mcp-server.mjs"]
+   env = { GROK_PATH = "/Users/your-user/.grok/bin/grok" }
+   ```
+
+3. 在 Codex 中 reload MCP 或重启。
+
+仓库附带的安装器会把 skill 同步到 `~/.codex/skills/grok-build` 并补充本地 MCP
+注册：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Chrisyii/codex-grok-build/main/install.sh | bash
-```
-
-安装脚本会自动完成：
-- 克隆仓库到 `~/.codex/skills/grok-build`
-- 尝试写入 MCP 配置到 `~/.codex/config.toml`
-- 检查 Grok Build 环境
-- 给出测试命令
-
-或者使用 git 方式（推荐，便于后续更新）：
-
-```bash
-git clone git@github.com:Chrisyii/codex-grok-build.git ~/.codex/skills/grok-build
-cd ~/.codex/skills/grok-build
 bash install.sh
 ```
 
----
+## 使用
 
-## 🛠️ 使用方法
+直接要求 Codex 生成媒体：
 
-安装并在 Codex 中 reload MCP 后，直接在对话里说就行：
-
-### 图像生成
-```
-生成一张 16:9 的未来赛博城市夜景，霓虹雨夜，电影感
-用 Grok Build 做
+```text
+用 Grok Build 生成一段六秒视频：清晨一只白鹤在稻田中行走，机位稳定，纪录片风格。
 ```
 
-### 视频生成
-```
-用 Grok 做一个 6 秒的爵士猫在钢琴上跳舞的短视频
-```
+skill 会让 Codex 调用 `grok_generate_video` 并传入当前项目绝对路径。成功结果从
+`generated/` 返回，Codex 可以直接渲染。
 
-### 迭代编辑（超级好用）
-```
-基于上一张图，改成白天版本，加一辆飞驰的悬浮车
-```
+## 可靠性契约
 
-### 通用委托
-```
-delegate to grok: 分析当前项目架构，给出 3 个最值得优化的点
-```
-
-Codex 的 agent 会自动发现 `grok-build` 工具并调用。
-
----
-
-## 📁 文件输出说明
-
-生成的文件**不会**留在 Grok 的 session 文件夹，而是会被**移动**到：
-
-```
-你的当前项目/generated/
-```
-
-例如：
-```
-project/generated/1721301234567-1.jpg
-```
-
-这样你可以在项目里直接引用、管理，干净又方便。
-
----
-
-## 🧩 如何在 Codex 中启用 MCP
-
-install.sh 会尽量自动添加配置到 `~/.codex/config.toml`。
-
-如果需要手动添加（或使用 mcp-configs 方式），复制下面内容：
-
-```json
-{
-  "grok-build": {
-    "command": "node",
-    "args": ["$HOME/.codex/skills/grok-build/scripts/grok-acp-mcp-server.mjs"],
-    "env": {
-      "GROK_PATH": "$HOME/.grok/bin/grok"
-    },
-    "description": "Grok Build - 图片/视频/通用任务（使用本地已登录的 Grok Build）"
-  }
-}
-```
-
-添加后在 Codex 执行 `reload MCP` 或重启。
-
----
-
-## 🔧 工具列表（MCP）
-
-注册后 Codex 会看到以下工具：
-
-- `grok_generate_image` — 生成图片（支持 aspect_ratio + cwd）
-- `grok_generate_video` — 生成视频（支持参考图 + cwd）
-- `grok_run` — 通用任务委托
-
-推荐在 prompt 中让 agent 传入当前项目路径（`cwd`），以便文件正确归位。
-
----
-
-## 🏗️ 工作原理（简要）
-
-Codex Skill/MCP → 调用本地桥接脚本  
-→ 通过 `grok -p --yolo --cwd 项目路径` 或 ACP stdio 调用 Grok Build  
-→ Grok 使用完整 Imagine 工具 + grok-media 专业流程  
-→ 生成的文件被桥接脚本移动到项目 `generated/` 目录  
-→ 返回 Markdown 路径给 Codex 直接渲染
-
-支持两种后端（优先 headless，更稳定；ACP 更丰富）。
-
----
-
-## ❓ 常见问题
-
-**Q: 提示没登录？**  
-A: 运行 `grok login` 或 `~/.grok/bin/grok login`
-
-**Q: 文件没出现在项目里？**  
-A: 确保调用时传了 `cwd`，或者手动指定项目路径测试。
-
-**Q: 想同时用 fal / agnes？**  
-A: 完全没问题！这个插件是并存的，你可以随时切换。
-
-**Q: 第一次生成很慢？**  
-A: 正常，模型加载 + 推理需要时间。后续会快很多。
-
----
-
-## 🤝 贡献
-
-欢迎提 Issue / PR！
-
-- 改进提示词工程
-- 增加更多 Grok 工具支持
-- 优化文件移动逻辑
-- 添加更多使用示例
-
----
-
-## 📜 License
-
-MIT
-
----
-
-**让 Codex 拥有 Grok Build 的全部力量。**
-
-*Now go create something beautiful.* ✨
-
-如果这个插件帮到了你，欢迎 star ⭐ 和分享！
+- 图片和视频工具必须传入绝对路径 `cwd`，不依赖不透明的 session 输出位置。
+- 桥接只在验证文件存在后移动它，并报告 `generated/` 中的最终路径。
+- 缺失文件、非法 Grok 输出、进程启动失败与超时都会成为正常 MCP 错误，不会关闭
+  MCP 传输。
+- 桥接最多捕获 4 MiB 进程输出，单次请求最长十分钟。
 
 ## 开发
 
-主要文件：
-- `SKILL.md` — Codex skill 定义
-- `scripts/grok-acp-client.mjs` — ACP 客户端核心（可独立运行）
-
-想扩展更多工具（批量生成、视频拼接控制等）可以继续丰富 client。
-
-## 注意事项
-
-- 第一次生成可能较慢（模型加载）。
-- 确保 Grok Build 已经 `grok login`。
-- 生成的文件现在会自动复制到你当前 Codex 项目的 `generated/` 目录下（非常好找）。
-
-## 如何分享给其他人
-
-### 准备工作
-
-1. 把整个文件夹推送到 GitHub（推荐仓库名保持 `codex-grok-build`）。
-2. 把仓库里的 install.sh 和 README 中的占位符替换成你的 GitHub 用户名（当前已使用 Chrisyii）。
-3. 提交并 push。
-
-### 一键安装方式
-
-最简单的一键命令：
+运行不生成真实媒体的回归测试：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Chrisyii/codex-grok-build/main/install.sh | bash
+npm test
 ```
 
-这会：
-- 自动 clone 完整仓库到 `~/.codex/skills/grok-build`
-- 运行安装逻辑（包括自动 MCP 配置）
-- 检查 Grok Build 环境
-
-Git 手动方式（推荐，便于后续更新）：
-
-```bash
-git clone https://github.com/Chrisyii/codex-grok-build ~/.codex/skills/grok-build
-cd ~/.codex/skills/grok-build
-bash install.sh
-```
-
-### 更新插件
-
-以后想更新可以执行：
-
-```bash
-cd ~/.codex/skills/grok-build
-git pull
-bash install.sh
-```
-
-### 额外建议
-
-- 在仓库 README 里放使用示例和已知问题。
-- 可以加一个 `CHANGELOG.md`。
-- 如果想更进一步，可以把这个 skill 做成跨工具包（支持 Codex / Claude / Cursor）。
-
-安装脚本已经支持远程一键安装，新用户基本不用敲太多命令。
-
----
-
-让 Codex 拥有 Grok Build 的全部力量。
+测试使用伪 Grok 可执行文件，覆盖文件移动、不可访问输出与 MCP 请求/响应协议。
