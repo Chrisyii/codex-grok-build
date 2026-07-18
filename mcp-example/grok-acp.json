@@ -1,0 +1,10 @@
+{
+  "grok-build": {
+    "command": "node",
+    "args": ["$HOME/.codex/skills/grok-build/scripts/grok-acp-mcp-server.mjs"],
+    "env": {
+      "GROK_PATH": "$HOME/.grok/bin/grok"
+    },
+    "description": "Grok Build via local logged-in agent (图片生成、视频、任意任务委托)。使用 Grok Build 的 image_gen / grok-media 能力。"
+  }
+}
