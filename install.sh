@@ -36,7 +36,12 @@ if [ ! -f "$SCRIPT_DIR/scripts/grok-headless-bridge.mjs" ] && [ "$SCRIPT_DIR" !=
 fi
 
 # 1. 创建目标目录
-mkdir -p "$TARGET_SKILL_DIR/scripts" "$TARGET_SKILL_DIR/test"
+mkdir -p \
+  "$TARGET_SKILL_DIR/scripts/lib" \
+  "$TARGET_SKILL_DIR/prompts" \
+  "$TARGET_SKILL_DIR/schemas" \
+  "$TARGET_SKILL_DIR/test" \
+  "$TARGET_SKILL_DIR/mcp-example"
 
 # 2. 复制/同步文件
 if [ "$SCRIPT_DIR" = "$TARGET_SKILL_DIR" ]; then
@@ -46,10 +51,17 @@ else
   cp -f "$SCRIPT_DIR/SKILL.md" "$TARGET_SKILL_DIR/" 2>/dev/null || echo "  - SKILL.md 跳过"
   cp -f "$SCRIPT_DIR/README.md" "$TARGET_SKILL_DIR/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/package.json" "$TARGET_SKILL_DIR/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/NOTICE" "$TARGET_SKILL_DIR/" 2>/dev/null || true
 
   echo "同步桥接脚本..."
   cp -f "$SCRIPT_DIR/scripts/"*.mjs "$TARGET_SKILL_DIR/scripts/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/scripts/lib/"*.mjs "$TARGET_SKILL_DIR/scripts/lib/" 2>/dev/null || true
   chmod +x "$TARGET_SKILL_DIR/scripts/"*.mjs 2>/dev/null || true
+
+  echo "同步 prompts / schemas / MCP 示例..."
+  cp -f "$SCRIPT_DIR/prompts/"* "$TARGET_SKILL_DIR/prompts/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/schemas/"* "$TARGET_SKILL_DIR/schemas/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/mcp-example/"* "$TARGET_SKILL_DIR/mcp-example/" 2>/dev/null || true
 
   echo "同步回归测试..."
   cp -f "$SCRIPT_DIR/test/"*.test.mjs "$TARGET_SKILL_DIR/test/" 2>/dev/null || true
@@ -86,11 +98,11 @@ cat <<'EOF'
     "env": {
       "GROK_PATH": "$HOME/.grok/bin/grok"
     },
-    "description": "Grok Build - 图片/视频/通用任务（使用你本地登录的 Grok Build）"
+    "description": "Grok Build - 图片/视频/审查/批判/任务委托（使用你本地登录的 Grok Build）"
   }
 }
 
-注册后重启 Codex 或 reload MCP，即可在对话中直接使用 Grok Build 生成图片视频。
+注册后重启 Codex 或 reload MCP，即可在对话中直接使用 Grok Build。
 EOF
 
 echo
@@ -112,7 +124,7 @@ MCP_TOML='[mcp_servers.grok-build]
 command = "node"
 args = ["'"$TARGET_SKILL_DIR"'/scripts/grok-acp-mcp-server.mjs"]
 env = { GROK_PATH = "'"$GROK_BIN"'" }
-description = "Grok Build - 图片/视频/通用任务（使用本地已登录的 Grok Build）"'
+description = "Grok Build - 图片/视频/审查/批判/任务委托（使用本地已登录的 Grok Build）"'
 
 if [ -f "$CONFIG_TOML" ]; then
   if grep -q 'grok-build' "$CONFIG_TOML" 2>/dev/null; then
@@ -140,12 +152,16 @@ cat <<'EOT'
     "command": "node",
     "args": ["$HOME/.codex/skills/grok-build/scripts/grok-acp-mcp-server.mjs"],
     "env": { "GROK_PATH": "$HOME/.grok/bin/grok" },
-    "description": "Grok Build - 图片/视频/通用任务"
+    "description": "Grok Build - 图片/视频/审查/批判/任务委托"
   }
 }
 EOT
 
 echo
-echo "MCP 生效后，在 Codex 对话里直接说“用 Grok Build 生成...” 即可。"
+echo "MCP 生效后，在 Codex 对话里可直接说："
+echo "  用 Grok Build 生成..."
+echo "  用 Grok 审查当前改动"
+echo "  用 Grok 批判相对 main 的设计风险"
+echo "  把这个任务交给 Grok 修"
 echo "更多说明见 $TARGET_SKILL_DIR/README.md"
 echo "安装/同步步骤结束。"

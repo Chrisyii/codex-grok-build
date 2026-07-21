@@ -20,3 +20,6 @@ temp/
 # User specific (do not commit)
 *.env
 .env.local
+
+# Local agent state
+.helloagents/

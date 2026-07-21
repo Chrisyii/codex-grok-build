@@ -5,6 +5,6 @@
     "env": {
       "GROK_PATH": "$HOME/.grok/bin/grok"
     },
-    "description": "Grok Build via local logged-in agent (图片生成、视频、任意任务委托)。使用 Grok Build 的 image_gen / grok-media 能力。"
+    "description": "Grok Build：图片/视频生成、代码审查、设计批判、任意任务委托。"
   }
 }

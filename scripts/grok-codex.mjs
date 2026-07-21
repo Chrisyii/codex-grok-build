@@ -37,6 +37,9 @@ async function run() {
   grok-codex image "提示词"
   grok-codex video "提示词"
   grok-codex run   "任意任务提示词"
+
+推荐在 Codex 内走 MCP（grok_generate_* / grok_review / grok_critique / grok_run），
+而不是直接调用本 CLI。
 `);
     process.exit(0);
   }
