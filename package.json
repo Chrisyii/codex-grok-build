@@ -1,9 +1,10 @@
 {
   "name": "codex-grok-build",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "verify:cursor": "node scripts/verify-cursor.mjs"
   }
 }

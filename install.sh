@@ -41,7 +41,8 @@ mkdir -p \
   "$TARGET_SKILL_DIR/prompts" \
   "$TARGET_SKILL_DIR/schemas" \
   "$TARGET_SKILL_DIR/test" \
-  "$TARGET_SKILL_DIR/mcp-example"
+  "$TARGET_SKILL_DIR/mcp-example" \
+  "$TARGET_SKILL_DIR/cursor"
 
 # 2. 复制/同步文件
 if [ "$SCRIPT_DIR" = "$TARGET_SKILL_DIR" ]; then
@@ -52,16 +53,20 @@ else
   cp -f "$SCRIPT_DIR/README.md" "$TARGET_SKILL_DIR/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/package.json" "$TARGET_SKILL_DIR/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/NOTICE" "$TARGET_SKILL_DIR/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/LICENSE" "$TARGET_SKILL_DIR/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/install-cursor.sh" "$TARGET_SKILL_DIR/" 2>/dev/null || true
 
   echo "同步桥接脚本..."
   cp -f "$SCRIPT_DIR/scripts/"*.mjs "$TARGET_SKILL_DIR/scripts/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/scripts/lib/"*.mjs "$TARGET_SKILL_DIR/scripts/lib/" 2>/dev/null || true
   chmod +x "$TARGET_SKILL_DIR/scripts/"*.mjs 2>/dev/null || true
+  chmod +x "$TARGET_SKILL_DIR/install-cursor.sh" 2>/dev/null || true
 
-  echo "同步 prompts / schemas / MCP 示例..."
+  echo "同步 prompts / schemas / MCP 示例 / Cursor skill..."
   cp -f "$SCRIPT_DIR/prompts/"* "$TARGET_SKILL_DIR/prompts/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/schemas/"* "$TARGET_SKILL_DIR/schemas/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/mcp-example/"* "$TARGET_SKILL_DIR/mcp-example/" 2>/dev/null || true
+  cp -f "$SCRIPT_DIR/cursor/"* "$TARGET_SKILL_DIR/cursor/" 2>/dev/null || true
 
   echo "同步回归测试..."
   cp -f "$SCRIPT_DIR/test/"*.test.mjs "$TARGET_SKILL_DIR/test/" 2>/dev/null || true
