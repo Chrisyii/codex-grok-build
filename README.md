@@ -74,7 +74,7 @@ bash install.sh
 
 ## Cursor 支持
 
-同一套 MCP 运行时也可给 Cursor Agent 用：
+同一套 MCP 运行时与 **同一份 skill** 也可给 Cursor Agent 用：
 
 ```bash
 bash install-cursor.sh
@@ -82,8 +82,8 @@ bash install-cursor.sh
 
 会：
 
-1. 同步共享运行时到 `~/.codex/skills/grok-build`
-2. 安装 Cursor skill 到 `~/.cursor/skills/grok-build`
+1. 同步共享运行时/skill 到 `~/.codex/skills/grok-build`
+2. 删除可能存在的 `~/.cursor/skills/grok-build` 重复副本（避免技能面板出现两个 grok-build）
 3. 写入 `~/.cursor/mcp.json` 的 `mcpServers.grok-build`
 
 验证（不生成真实媒体）：
@@ -93,7 +93,7 @@ npm test
 npm run verify:cursor
 ```
 
-然后在 Cursor 里 reload MCP / 重启，对话中说「用 Grok 检查一下是否就绪」。
+然后在 Cursor 里 reload MCP / 重启。技能列表里应只剩 **一个** `grok-build`。
 
 ## 使用
 

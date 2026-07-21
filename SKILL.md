@@ -1,19 +1,25 @@
 ---
 name: grok-build
 description: >
-  通过 Codex MCP 调用本机已登录的 Grok Build：生成图片/视频、代码审查、设计批判、
-  任意任务委托。当用户明确要求 Grok、Grok Build、Imagine、审查委托给 Grok 时激活。
+  通过 MCP 调用本机已登录的 Grok Build：生成图片/视频、代码审查、设计批判、
+  任意任务委托。适用于 Codex 与 Cursor。当用户明确要求 Grok、Grok Build、Imagine、
+  审查委托给 Grok 时激活。
 ---
 
-# Grok Build for Codex
+# Grok Build（Codex / Cursor）
 
 通过已注册的 `grok-build` MCP 服务使用本机 Grok。媒体文件会落到项目 `generated/`；
 审查/批判为只读；委托默认可写。
+
+本 skill 只维护一份（`~/.codex/skills/grok-build`）。Cursor 与 Codex 共用；
+Cursor 侧只需额外注册 MCP（`install-cursor.sh`），不要再复制一份 skill，否则会重复出现。
 
 ## 必经调用路径
 
 用户要求 Grok 能力时，直接调用 MCP 工具。正常交付中不得手工调用 Grok CLI、ACP
 客户端或桥接脚本。
+
+在 Cursor 中：先对 `grok-build` / `user-grok-build` 做工具发现，再 `CallMcpTool`。
 
 | 需求 | 工具 | 关键参数 |
 | --- | --- | --- |
@@ -65,13 +71,16 @@ grok_run({
 如果 MCP 工具不可用，明确报告 `grok-build` MCP 服务未注册或未加载。不得改走手工
 CLI 备用路径。工具返回错误时直接报告，不得声称已成功。
 
-## 输出要求
-
-- 媒体：只使用工具返回的绝对路径，并以 Markdown 媒体格式呈现
-- 审查/批判/委托：原样呈现工具返回的文本；若有 session ID，告知用户可 resume
-- 提示词保留用户要求的时长、比例、主体、关注点与排除项
-
 ## 安装与验证
 
-本机必须安装并登录 Grok。用 `mcp-example/grok-acp.json` 或 `install.sh` 注册 MCP，
-然后在 Codex 中 reload MCP。在本 skill 目录运行 `npm test` 验证修改。
+本机必须安装并登录 Grok。
+
+- Codex：`bash install.sh`，然后 reload MCP
+- Cursor：`bash install-cursor.sh`（同步运行时 + 写入 `~/.cursor/mcp.json`，**不**再装第二份 skill）
+
+验证：
+
+```bash
+npm test
+npm run verify:cursor
+```

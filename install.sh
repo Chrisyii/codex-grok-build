@@ -62,11 +62,13 @@ else
   chmod +x "$TARGET_SKILL_DIR/scripts/"*.mjs 2>/dev/null || true
   chmod +x "$TARGET_SKILL_DIR/install-cursor.sh" 2>/dev/null || true
 
-  echo "同步 prompts / schemas / MCP 示例 / Cursor skill..."
+  echo "同步 prompts / schemas / MCP 示例 / Cursor 说明..."
   cp -f "$SCRIPT_DIR/prompts/"* "$TARGET_SKILL_DIR/prompts/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/schemas/"* "$TARGET_SKILL_DIR/schemas/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/mcp-example/"* "$TARGET_SKILL_DIR/mcp-example/" 2>/dev/null || true
   cp -f "$SCRIPT_DIR/cursor/"* "$TARGET_SKILL_DIR/cursor/" 2>/dev/null || true
+  # Remove obsolete Cursor skill copy if an older install dropped SKILL.md here
+  rm -f "$TARGET_SKILL_DIR/cursor/SKILL.md" 2>/dev/null || true
 
   echo "同步回归测试..."
   cp -f "$SCRIPT_DIR/test/"*.test.mjs "$TARGET_SKILL_DIR/test/" 2>/dev/null || true

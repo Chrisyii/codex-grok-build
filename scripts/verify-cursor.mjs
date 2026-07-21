@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * Verify grok-build MCP works the way Cursor will call it (stdio JSON-RPC).
+ * Also asserts there is exactly one skill install (shared under ~/.codex/skills).
  * Does not generate real media.
  */
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, chmodSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -106,10 +107,8 @@ async function main() {
       failures.push('grok_check not ready with fake grok');
     }
 
-    // Cursor mcp.json shape check if present
     const cursorMcp = join(process.env.HOME, '.cursor', 'mcp.json');
     try {
-      const { readFileSync } = await import('node:fs');
       const cfg = JSON.parse(readFileSync(cursorMcp, 'utf8'));
       const entry = cfg?.mcpServers?.['grok-build'];
       if (!entry) {
@@ -123,22 +122,24 @@ async function main() {
       failures.push('could not read ~/.cursor/mcp.json');
     }
 
-    // Cursor skill check
-    try {
-      const { readFileSync, existsSync } = await import('node:fs');
-      const skillPath = join(process.env.HOME, '.cursor', 'skills', 'grok-build', 'SKILL.md');
-      if (!existsSync(skillPath)) {
-        failures.push('missing ~/.cursor/skills/grok-build/SKILL.md');
+    const sharedSkill = join(process.env.HOME, '.codex', 'skills', 'grok-build', 'SKILL.md');
+    const duplicateCursorSkill = join(process.env.HOME, '.cursor', 'skills', 'grok-build');
+    if (!existsSync(sharedSkill)) {
+      failures.push('missing shared skill ~/.codex/skills/grok-build/SKILL.md');
+    } else {
+      const body = readFileSync(sharedSkill, 'utf8');
+      if (!/grok_generate_image/.test(body) || !/MCP/.test(body)) {
+        failures.push('shared SKILL.md missing MCP guidance');
       } else {
-        const body = readFileSync(skillPath, 'utf8');
-        if (!/grok_generate_image/.test(body) || !/CallMcpTool|MCP/.test(body)) {
-          failures.push('Cursor SKILL.md missing MCP guidance');
-        } else {
-          console.log('✓ ~/.cursor/skills/grok-build/SKILL.md');
-        }
+        console.log('✓ shared skill ~/.codex/skills/grok-build/SKILL.md');
       }
-    } catch (error) {
-      failures.push(`skill check failed: ${error.message}`);
+    }
+    if (existsSync(duplicateCursorSkill)) {
+      failures.push(
+        'duplicate skill at ~/.cursor/skills/grok-build — remove it (run install-cursor.sh)',
+      );
+    } else {
+      console.log('✓ no duplicate ~/.cursor/skills/grok-build');
     }
 
     if (failures.length) {
